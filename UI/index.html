@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PseudoFlow - Interactive Pseudocode to Flowchart Compiler</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <!-- Mermaid.js for client-side graph rendering -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+
+  <!-- Top Navbar matching screenshot -->
+  <header class="top-navbar">
+    <div class="nav-left">
+      <!-- Home Icon -->
+      <button class="icon-btn" id="btn-home" title="Home">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/>
+        </svg>
+      </button>
+
+      <!-- Menu / Hamburger Icon -->
+      <button class="icon-btn" id="btn-menu" title="Menu">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+        </svg>
+      </button>
+
+      <!-- Orientation / Layout Switch Icon -->
+      <button class="icon-btn" id="btn-orientation" title="Toggle Layout">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <line x1="12" y1="3" x2="12" y2="21"/>
+        </svg>
+      </button>
+
+      <!-- Theme / Contrast Mode Toggle Icon -->
+      <button class="icon-btn" id="btn-theme" title="Toggle Theme">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14v12c3.31 0 6-2.69 6-6s-2.69-6-6-6z"/>
+        </svg>
+      </button>
+
+      <!-- Green Run Button -->
+      <button class="run-btn" id="run-btn" title="Compile & Generate Flowchart (Ctrl+Enter)">
+        Run ❯
+      </button>
+    </div>
+
+    <div class="nav-right">
+      <span class="size-indicator" id="size-indicator">Result Size: 938 x 834</span>
+      <button class="action-btn-green" id="export-btn" title="Export SVG Flowchart">
+        Export Flowchart
+      </button>
+    </div>
+  </header>
+
+  <!-- Two-Pane Main Workspace -->
+  <main class="workspace" id="workspace">
+
+    <!-- Left Pane: Pseudocode Editor & Line Role Classifier -->
+    <section class="pane left-pane" id="left-pane">
+      
+      <!-- Role Classification Color Legend -->
+      <div class="legend-bar" id="legend-bar">
+        <span class="legend-title">Line Roles (click to highlight):</span>
+        <span class="legend-badge start-end" data-role="start-end" title="Click to highlight START / END lines">
+          <strong>(s)</strong> Start / End
+        </span>
+        <span class="legend-badge if" data-role="if" title="Click to highlight IF Decision lines">
+          <strong>(i)</strong> IF Decision
+        </span>
+        <span class="legend-badge else" data-role="else" title="Click to highlight ELSE lines">
+          <strong>(el)</strong> ELSE Branch
+        </span>
+        <span class="legend-badge loop" data-role="loop" title="Click to highlight Loop lines">
+          <strong>(f)</strong> Loop Header
+        </span>
+        <span class="legend-badge io" data-role="io" title="Click to highlight Input / Output lines">
+          <strong>(io)</strong> Input / Output
+        </span>
+        <span class="legend-badge process" data-role="process" title="Click to highlight Process / Assignment lines">
+          <strong>(p)</strong> Process / Assign
+        </span>
+        <span class="legend-badge end-block" data-role="end-block" title="Click to highlight End Block lines">
+          <strong>(eb)</strong> End Block
+        </span>
+      </div>
+
+      <!-- Editor Container -->
+      <div class="editor-container" id="editor-container">
+        <!-- Line Gutter with numbers and classification dots -->
+        <div class="line-gutter" id="line-gutter">
+          <!-- Populated dynamically by app.js -->
+        </div>
+
+        <!-- Textarea and Syntax Highlighting Underlay -->
+        <div class="editor-wrapper" id="editor-wrapper">
+          <div class="editor-highlight" id="editor-highlight" aria-hidden="true"></div>
+          <textarea 
+            class="editor-textarea" 
+            id="editor-textarea" 
+            spellcheck="false" 
+            placeholder="Write pseudocode here... e.g.&#10;START&#10;INPUT n&#10;IF n % 2 == 0&#10;    OUTPUT &quot;Even&quot;&#10;ELSE&#10;    OUTPUT &quot;Odd&quot;&#10;END IF&#10;END"
+          >START
+INPUT n
+IF n % 2 == 0
+    OUTPUT "Even"
+ELSE
+    OUTPUT "Odd"
+END IF
+END</textarea>
+        </div>
+
+        <!-- Rightmost Line Indicator Gutter -->
+        <div class="right-gutter" id="right-gutter">
+          <!-- Populated dynamically with (s), (f), (i) badges by app.js -->
+        </div>
+      </div>
+
+      <!-- Bottom Editor Toolbar with Presets and Metrics -->
+      <footer class="editor-toolbar">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <label for="preset-select" style="font-weight: 500; color: #64748b;">Preset:</label>
+          <select id="preset-select" class="preset-dropdown">
+            <option value="even_odd">IF-ELSE (Even / Odd Test)</option>
+            <option value="nested_for">Nested FOR Loops</option>
+            <option value="while_sum">WHILE Loop (Accumulator)</option>
+            <option value="linear_calc">Linear Process & Calculations</option>
+            <option value="custom">Custom Template</option>
+          </select>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; color: #64748b; font-size: 12px;">
+          <span id="line-count-badge">8 lines</span>
+          <span>•</span>
+          <span id="char-count-badge">87 chars</span>
+        </div>
+      </footer>
+    </section>
+
+    <!-- Draggable Gutter Divider -->
+    <div class="gutter" id="pane-gutter" title="Drag to resize panes"></div>
+
+    <!-- Right Pane: Terminal / Flowchart Preview -->
+    <section class="pane right-pane" id="right-pane">
+      
+      <!-- Preview Toolbar -->
+      <div class="preview-toolbar">
+        <div class="tab-group">
+          <button class="tab-btn active" id="tab-diagram" data-view="diagram">Flowchart View</button>
+          <button class="tab-btn" id="tab-code" data-view="code">Mermaid Script</button>
+        </div>
+
+        <div class="canvas-controls">
+          <button class="btn-sm" id="btn-zoom-in" title="Zoom In (+)">Zoom +</button>
+          <button class="btn-sm" id="btn-zoom-out" title="Zoom Out (-)">Zoom -</button>
+          <button class="btn-sm" id="btn-zoom-reset" title="Reset Zoom">Reset</button>
+          <button class="btn-sm" id="btn-copy-mermaid" title="Copy Mermaid Syntax">Copy Code</button>
+          <button class="btn-sm" id="btn-copy-svg" title="Copy SVG code">Copy SVG</button>
+        </div>
+      </div>
+
+      <!-- Canvas Area -->
+      <div class="canvas-container" id="canvas-container">
+        <!-- Rendered Flowchart -->
+        <div id="mermaid-output">
+          <div class="empty-state" style="color: #71717a; font-family: monospace; font-size: 13px;">
+            Click <strong>Run ❯</strong> or press <strong>Ctrl+Enter</strong> to compile.
+          </div>
+        </div>
+
+        <!-- Raw Mermaid Code (Toggled via tab) -->
+        <pre id="raw-code-view"></pre>
+      </div>
+
+      <!-- Status Footer -->
+      <footer class="status-bar">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span id="status-indicator" style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background-color: #10b981;"></span>
+          <span id="status-text">Ready</span>
+        </div>
+        <div>
+          <span id="status-model" style="color: #a1a1aa;">Architecture: Path A Neuro-Symbolic (BiRNN + Assembler)</span>
+        </div>
+        <div>
+          <span id="status-nodes">0 nodes • 0 edges</span>
+        </div>
+      </footer>
+
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

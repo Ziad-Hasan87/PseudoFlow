@@ -1,6 +1,6 @@
 """
 build_notebook.py
-Generates the complete PseudoFlow_Translator.ipynb notebook matching all user specifications.
+Generates the Path A (Neuro-Symbolic Sequence Labeler + Graph Router) notebook.
 """
 
 import json
@@ -8,13 +8,11 @@ import json
 cells = []
 
 def add_cell(markdown_line, code_text):
-    # Markdown cell with single line text
     cells.append({
         "cell_type": "markdown",
         "metadata": {},
         "source": [markdown_line + "\n"]
     })
-    # Code cell with NO comments
     cells.append({
         "cell_type": "code",
         "execution_count": None,
@@ -25,7 +23,7 @@ def add_cell(markdown_line, code_text):
 
 
 # ------------------------------------------------------------------------------
-# Cell 1: Libraries & Device
+# Stage 1: Libraries & Device
 # ------------------------------------------------------------------------------
 add_cell(
     "### 1. Import required libraries and configure compute device",
@@ -49,138 +47,126 @@ print(f"Compute device: {device}")"""
 )
 
 # ------------------------------------------------------------------------------
-# Cell 2: Load Raw Corpus
+# Stage 2: Load Raw Corpus
 # ------------------------------------------------------------------------------
 add_cell(
-    "### 2. Load the raw pseudocode and mermaid corpus from disk",
+    "### 2. Load the raw pseudocode corpus from disk",
     """with open('Raw_Corpus.json', 'r', encoding='utf-8') as f:
     raw_data = json.load(f)
 
-corpus = raw_data['corpus']
-print(f"Total raw samples loaded: {len(corpus)}")"""
+raw_corpus = raw_data['corpus']
+print(f"Total raw programs loaded: {len(raw_corpus)}")"""
 )
 
 # ------------------------------------------------------------------------------
-# Cell 3: Clean & Normalize
+# Stage 3: Normalize & Generate Tagged Corpus
 # ------------------------------------------------------------------------------
 add_cell(
-    "### 3. Preprocess and normalize pseudocode and mermaid text representations and save to Clean_Corpus.json",
-    """def normalize_text(text):
-    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
-    return "\\n".join(lines)
+    "### 3. Normalize pseudocode programs, assign statement roles, and save to Tagged_Corpus.json",
+    """def classify_statement_rule(line):
+    line_clean = line.strip()
+    if line_clean == "START":
+        return "START_NODE"
+    elif line_clean == "END":
+        return "END_NODE"
+    elif line_clean == "END IF":
+        return "END_IF"
+    elif line_clean == "END FOR":
+        return "END_FOR"
+    elif line_clean == "ELSE":
+        return "ELSE_BRANCH"
+    elif line_clean.startswith("INPUT ") or line_clean.startswith("OUTPUT ") or line_clean == "INPUT" or line_clean == "OUTPUT":
+        return "IO_NODE"
+    elif line_clean.startswith("LET "):
+        return "PROCESS_NODE"
+    elif line_clean.startswith("IF "):
+        return "IF_DECISION"
+    elif line_clean.startswith("FOR "):
+        return "LOOP_HEADER"
+    else:
+        return "PROCESS_NODE"
 
-clean_corpus = []
-for item in corpus:
-    clean_corpus.append({
-        "pseudocode": normalize_text(item["pseudocode"]),
-        "mermaid": normalize_text(item["mermaid"])
+tagged_corpus = []
+for item in raw_corpus:
+    lines = [line.strip() for line in item["pseudocode"].splitlines() if line.strip()]
+    tags = [classify_statement_rule(l) for l in lines]
+    tagged_corpus.append({
+        "lines": lines,
+        "tags": tags
     })
 
-with open('Clean_Corpus.json', 'w', encoding='utf-8') as f:
-    json.dump({"corpus": clean_corpus}, f, indent=2)
+with open('Tagged_Corpus.json', 'w', encoding='utf-8') as f:
+    json.dump({"corpus": tagged_corpus}, f, indent=2)
 
-print(f"Cleaned {len(clean_corpus)} samples and saved to Clean_Corpus.json")"""
+print(f"Tagged {len(tagged_corpus)} programs and saved to Tagged_Corpus.json")
+print("Sample lines:", tagged_corpus[0]["lines"][:4])
+print("Sample tags:", tagged_corpus[0]["tags"][:4])"""
 )
 
 # ------------------------------------------------------------------------------
-# Cell 4: Tokenize Corpus
+# Stage 4: Vocabularies
 # ------------------------------------------------------------------------------
 add_cell(
-    "### 4. Tokenize pseudocode and mermaid programs into lexical units and save to Token_Corpus.json",
-    """def tokenize_pseudocode(code_text):
-    pattern = re.compile(r'(?:END\\s+IF|END\\s+FOR)|[A-Za-z_][A-Za-z0-9_]*|\\d+|==|!=|<=|>=|[+\\-*/%=<>()]')
-    tokens = []
-    for line in code_text.splitlines():
-        line = line.strip()
-        if line:
-            tokens.extend(pattern.findall(line))
-            tokens.append("<NL>")
-    if tokens and tokens[-1] == "<NL>":
-        tokens.pop()
-    return tokens
-
-def tokenize_mermaid(mermaid_text):
-    pattern = re.compile(r'flowchart|TD|-->|--\\s+[A-Za-z0-9]+\\s+-->|\\[/|/\\]|\\(\\[|\\]\\)|\\{|\\}|\\[|\\]|\\"|==|!=|<=|>=|[+\\-*/%=<>]|[A-Za-z_][A-Za-z0-9_]*|\\d+')
-    tokens = []
-    for line in mermaid_text.splitlines():
-        line = line.strip()
-        if line:
-            tokens.extend(pattern.findall(line))
-            tokens.append("<NL>")
-    if tokens and tokens[-1] == "<NL>":
-        tokens.pop()
-    return tokens
-
-token_corpus = []
-for item in clean_corpus:
-    token_corpus.append({
-        "src_tokens": tokenize_pseudocode(item["pseudocode"]),
-        "trg_tokens": tokenize_mermaid(item["mermaid"])
-    })
-
-with open('Token_Corpus.json', 'w', encoding='utf-8') as f:
-    json.dump({"corpus": token_corpus}, f, indent=2)
-
-print(f"Tokenized {len(token_corpus)} samples and saved to Token_Corpus.json")
-print("Sample source tokens:", token_corpus[0]["src_tokens"][:12])
-print("Sample target tokens:", token_corpus[0]["trg_tokens"][:12])"""
-)
-
-# ------------------------------------------------------------------------------
-# Cell 5: Vocabularies
-# ------------------------------------------------------------------------------
-add_cell(
-    "### 5. Build source and target vocabulary index mappings and save to vocabularies.json",
+    "### 4. Build word-level and tag index mappings and save to vocabularies.json",
     """PAD_TOKEN = "<PAD>"
 UNK_TOKEN = "<UNK>"
-SOS_TOKEN = "<SOS>"
-EOS_TOKEN = "<EOS>"
 
-src_vocab = {PAD_TOKEN: 0, UNK_TOKEN: 1, SOS_TOKEN: 2, EOS_TOKEN: 3}
-trg_vocab = {PAD_TOKEN: 0, UNK_TOKEN: 1, SOS_TOKEN: 2, EOS_TOKEN: 3}
+word_vocab = {PAD_TOKEN: 0, UNK_TOKEN: 1}
+tag_to_ix = {
+    PAD_TOKEN: 0,
+    "START_NODE": 1,
+    "END_NODE": 2,
+    "IO_NODE": 3,
+    "PROCESS_NODE": 4,
+    "IF_DECISION": 5,
+    "ELSE_BRANCH": 6,
+    "LOOP_HEADER": 7,
+    "END_IF": 8,
+    "END_FOR": 9
+}
+ix_to_tag = {v: k for k, v in tag_to_ix.items()}
 
-for item in token_corpus:
-    for tok in item["src_tokens"]:
-        if tok not in src_vocab:
-            src_vocab[tok] = len(src_vocab)
-    for tok in item["trg_tokens"]:
-        if tok not in trg_vocab:
-            trg_vocab[tok] = len(trg_vocab)
+pattern = re.compile(r'(?:END\\s+IF|END\\s+FOR)|[A-Za-z_][A-Za-z0-9_]*|\\d+|==|!=|<=|>=|[+\\-*/%=<>()]')
+for item in tagged_corpus:
+    for line in item["lines"]:
+        words = pattern.findall(line)
+        for w in words:
+            if w not in word_vocab:
+                word_vocab[w] = len(word_vocab)
 
-inv_src_vocab = {v: k for k, v in src_vocab.items()}
-inv_trg_vocab = {v: k for k, v in trg_vocab.items()}
+inv_word_vocab = {v: k for k, v in word_vocab.items()}
 
 vocab_data = {
-    "src_vocab": src_vocab,
-    "trg_vocab": trg_vocab
+    "word_vocab": word_vocab,
+    "tag_to_ix": tag_to_ix
 }
 
 with open('vocabularies.json', 'w', encoding='utf-8') as f:
     json.dump(vocab_data, f, indent=2)
 
-print(f"Source Vocab Size: {len(src_vocab)}")
-print(f"Target Vocab Size: {len(trg_vocab)}")
+print(f"Word Vocabulary Size: {len(word_vocab)}")
+print(f"Total Statement Tags: {len(tag_to_ix)}")
 print("Vocabularies saved to vocabularies.json")"""
 )
 
 # ------------------------------------------------------------------------------
-# Cell 6: DataLoader
+# Stage 5: Dataset & DataLoader
 # ------------------------------------------------------------------------------
 add_cell(
-    "### 6. Encode, pad, and batch tokenized sequences into PyTorch DataLoaders",
-    """def encode_sequence(tokens, vocab, add_sos_eos=True):
-    ids = [vocab.get(tok, vocab[UNK_TOKEN]) for tok in tokens]
-    if add_sos_eos:
-        return [vocab[SOS_TOKEN]] + ids + [vocab[EOS_TOKEN]]
+    "### 5. Encode, pad, and batch sequence pairs into PyTorch DataLoaders",
+    """def encode_line_to_words(line, max_words=10):
+    words = pattern.findall(line)
+    ids = [word_vocab.get(w, word_vocab[UNK_TOKEN]) for w in words][:max_words]
+    ids = ids + [word_vocab[PAD_TOKEN]] * (max_words - len(ids))
     return ids
 
-class PseudoFlowDataset(Dataset):
-    def __init__(self, token_data, src_v, trg_v):
+class StatementSequenceDataset(Dataset):
+    def __init__(self, data):
         self.samples = []
-        for item in token_data:
-            s_ids = encode_sequence(item["src_tokens"], src_v, add_sos_eos=True)
-            t_ids = encode_sequence(item["trg_tokens"], trg_v, add_sos_eos=True)
-            self.samples.append((s_ids, t_ids))
+        for item in data:
+            encoded_lines = [encode_line_to_words(l) for l in item["lines"]]
+            tag_ids = [tag_to_ix[t] for t in item["tags"]]
+            self.samples.append((encoded_lines, tag_ids))
 
     def __len__(self):
         return len(self.samples)
@@ -188,19 +174,23 @@ class PseudoFlowDataset(Dataset):
     def __getitem__(self, idx):
         return self.samples[idx]
 
-def collate_fn(batch):
-    src_batch, trg_batch = zip(*batch)
-    src_lens = [len(s) for s in src_batch]
-    trg_lens = [len(t) for t in trg_batch]
-    max_src_len = max(src_lens)
-    max_trg_len = max(trg_lens)
+def collate_seq_fn(batch):
+    lines_batch, tags_batch = zip(*batch)
+    max_lines = max(len(l) for l in lines_batch)
+    max_words = len(lines_batch[0][0])
 
-    padded_src = [s + [src_vocab[PAD_TOKEN]] * (max_src_len - len(s)) for s in src_batch]
-    padded_trg = [t + [trg_vocab[PAD_TOKEN]] * (max_trg_len - len(t)) for t in trg_batch]
+    padded_lines = []
+    padded_tags = []
+    for lines, tags in zip(lines_batch, tags_batch):
+        pad_count = max_lines - len(lines)
+        padded_l = lines + [[word_vocab[PAD_TOKEN]] * max_words] * pad_count
+        padded_t = tags + [tag_to_ix[PAD_TOKEN]] * pad_count
+        padded_lines.append(padded_l)
+        padded_tags.append(padded_t)
 
-    return torch.tensor(padded_src, dtype=torch.long), torch.tensor(padded_trg, dtype=torch.long)
+    return torch.tensor(padded_lines, dtype=torch.long), torch.tensor(padded_tags, dtype=torch.long)
 
-full_dataset = PseudoFlowDataset(token_corpus, src_vocab, trg_vocab)
+full_dataset = StatementSequenceDataset(tagged_corpus)
 train_size = int(0.85 * len(full_dataset))
 val_size = len(full_dataset) - train_size
 train_dataset, val_dataset = torch.utils.data.random_split(
@@ -208,395 +198,288 @@ train_dataset, val_dataset = torch.utils.data.random_split(
 )
 
 BATCH_SIZE = 32
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
-val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_fn)
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_seq_fn)
+val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_seq_fn)
 
 print(f"Train batches: {len(train_loader)} ({train_size} samples)")
 print(f"Validation batches: {len(val_loader)} ({val_size} samples)")"""
 )
 
 # ------------------------------------------------------------------------------
-# Cell 7: Seq2Seq Architecture
+# Stage 6: BiRNN Architecture
 # ------------------------------------------------------------------------------
 add_cell(
-    "### 7. Define the Encoder-Decoder Seq2Seq neural network architecture",
-    """class Seq2SeqEncoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_dim, num_layers=2, dropout=0.2):
+    "### 6. Define the BiRNN sequence labeling neural network architecture",
+    """class BiRNNStatementClassifier(nn.Module):
+    def __init__(self, vocab_size, embed_dim, hidden_dim, num_tags):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
-        self.lstm = nn.LSTM(embed_dim, hidden_dim, num_layers=num_layers, batch_first=True, dropout=dropout if num_layers > 1 else 0.0)
+        self.rnn = nn.LSTM(embed_dim, hidden_dim, batch_first=True, bidirectional=True)
+        self.fc = nn.Linear(hidden_dim * 2, num_tags)
 
-    def forward(self, x):
-        embedded = self.embedding(x)
-        outputs, (hidden, cell) = self.lstm(embedded)
-        return hidden, cell
+    def forward(self, line_batches):
+        b, l, w = line_batches.shape
+        flat_lines = line_batches.view(b * l, w)
+        embeds = self.embedding(flat_lines)
+        mask = (flat_lines != 0).unsqueeze(-1).float()
+        line_vecs = (embeds * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
+        line_vecs = line_vecs.view(b, l, -1)
+        rnn_out, _ = self.rnn(line_vecs)
+        logits = self.fc(rnn_out)
+        return logits
 
-class Seq2SeqDecoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, hidden_dim, num_layers=2, dropout=0.2):
-        super().__init__()
-        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
-        self.lstm = nn.LSTM(embed_dim, hidden_dim, num_layers=num_layers, batch_first=True, dropout=dropout if num_layers > 1 else 0.0)
-        self.fc = nn.Linear(hidden_dim, vocab_size)
+EMBED_DIM = 64
+HIDDEN_DIM = 64
+tagger_model = BiRNNStatementClassifier(len(word_vocab), EMBED_DIM, HIDDEN_DIM, len(tag_to_ix)).to(device)
+criterion = nn.CrossEntropyLoss(ignore_index=tag_to_ix[PAD_TOKEN])
+optimizer = optim.Adam(tagger_model.parameters(), lr=0.005)
 
-    def forward(self, x, hidden, cell):
-        embedded = self.embedding(x)
-        outputs, (hidden, cell) = self.lstm(embedded, (hidden, cell))
-        predictions = self.fc(outputs)
-        return predictions, hidden, cell
-
-class Seq2SeqTranslation(nn.Module):
-    def __init__(self, encoder, decoder, device):
-        super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-        self.device = device
-
-    def forward(self, src, trg, teacher_forcing_ratio=0.5):
-        batch_size = src.shape[0]
-        trg_len = trg.shape[1]
-        trg_vocab_size = self.decoder.fc.out_features
-
-        outputs = torch.zeros(batch_size, trg_len, trg_vocab_size).to(self.device)
-        hidden, cell = self.encoder(src)
-
-        decoder_input = trg[:, 0].unsqueeze(1)
-        for t in range(1, trg_len):
-            prediction, hidden, cell = self.decoder(decoder_input, hidden, cell)
-            outputs[:, t, :] = prediction.squeeze(1)
-            teacher_force = random.random() < teacher_forcing_ratio
-            top1 = prediction.argmax(-1)
-            decoder_input = trg[:, t].unsqueeze(1) if teacher_force else top1
-        return outputs"""
+print(tagger_model)"""
 )
 
 # ------------------------------------------------------------------------------
-# Cell 8: Model Setup
+# Stage 7: Training
 # ------------------------------------------------------------------------------
 add_cell(
-    "### 8. Instantiate model hyperparameters, loss criterion, and Adam optimizer",
-    """EMBED_DIM = 128
-HIDDEN_DIM = 256
-NUM_LAYERS = 2
-DROPOUT = 0.2
-LEARNING_RATE = 0.003
+    "### 7. Train the BiRNN sequence labeler and save the trained weights locally",
+    """TAGGER_PATH = "pseudoflow_tagger.pt"
+NUM_EPOCHS = 10
 
-encoder = Seq2SeqEncoder(len(src_vocab), EMBED_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT)
-decoder = Seq2SeqDecoder(len(trg_vocab), EMBED_DIM, HIDDEN_DIM, NUM_LAYERS, DROPOUT)
-model = Seq2SeqTranslation(encoder, decoder, device).to(device)
-
-criterion = nn.CrossEntropyLoss(ignore_index=trg_vocab[PAD_TOKEN])
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
-print(model)"""
-)
-
-# ------------------------------------------------------------------------------
-# Cell 9: Training & Checkpoint
-# ------------------------------------------------------------------------------
-add_cell(
-    "### 9. Train the Seq2Seq translation model and save the trained weights locally",
-    """MODEL_PATH = "pseudoflow_model.pt"
-NUM_EPOCHS = 15
-
-if os.path.exists(MODEL_PATH):
-    checkpoint = torch.load(MODEL_PATH, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+if os.path.exists(TAGGER_PATH):
+    checkpoint = torch.load(TAGGER_PATH, map_location=device)
+    tagger_model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    print(f"Loaded existing trained model from {MODEL_PATH}")
+    print(f"Loaded existing trained tagger from {TAGGER_PATH}")
 else:
-    print(f"Training Seq2Seq model for {NUM_EPOCHS} epochs...")
+    print(f"Training BiRNN Sequence Labeler for {NUM_EPOCHS} epochs...")
     for epoch in range(NUM_EPOCHS):
-        model.train()
+        tagger_model.train()
         epoch_loss = 0.0
-        for src_batch, trg_batch in train_loader:
-            src_batch = src_batch.to(device)
-            trg_batch = trg_batch.to(device)
+        for x_batch, y_batch in train_loader:
+            x_batch = x_batch.to(device)
+            y_batch = y_batch.to(device)
 
             optimizer.zero_grad()
-            output = model(src_batch, trg_batch, teacher_forcing_ratio=0.5)
+            logits = tagger_model(x_batch)
 
-            output_dim = output.shape[-1]
-            loss = criterion(output[:, 1:].reshape(-1, output_dim), trg_batch[:, 1:].reshape(-1))
+            loss = criterion(logits.view(-1, len(tag_to_ix)), y_batch.view(-1))
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
             epoch_loss += loss.item()
 
         avg_loss = epoch_loss / len(train_loader)
-        if (epoch + 1) % 3 == 0 or epoch == 0:
-            print(f"Epoch {epoch + 1}/{NUM_EPOCHS} - Training Loss: {avg_loss:.4f}")
+        print(f"Epoch {epoch + 1}/{NUM_EPOCHS} - Training Loss: {avg_loss:.4f}")
 
     torch.save({
-        "model_state_dict": model.state_dict(),
+        "model_state_dict": tagger_model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
-        "src_vocab": src_vocab,
-        "trg_vocab": trg_vocab,
-        "config": {
-            "embed_dim": EMBED_DIM,
-            "hidden_dim": HIDDEN_DIM,
-            "num_layers": NUM_LAYERS,
-            "dropout": DROPOUT
-        }
-    }, MODEL_PATH)
-    print(f"Model saved locally to {MODEL_PATH}")"""
+        "word_vocab": word_vocab,
+        "tag_to_ix": tag_to_ix
+    }, TAGGER_PATH)
+    print(f"Model saved locally to {TAGGER_PATH}")"""
 )
 
 # ------------------------------------------------------------------------------
-# Cell 10: Validation
+# Stage 8: Evaluation
 # ------------------------------------------------------------------------------
 add_cell(
-    "### 10. Evaluate the trained translation model on the validation dataset",
-    """model.eval()
+    "### 8. Evaluate the trained sequence labeler on the validation dataset",
+    """tagger_model.eval()
 val_loss = 0.0
-correct_tokens = 0
-total_tokens = 0
+correct = 0
+total = 0
 
 with torch.no_grad():
-    for src_batch, trg_batch in val_loader:
-        src_batch = src_batch.to(device)
-        trg_batch = trg_batch.to(device)
+    for x_batch, y_batch in val_loader:
+        x_batch = x_batch.to(device)
+        y_batch = y_batch.to(device)
 
-        output = model(src_batch, trg_batch, teacher_forcing_ratio=0.0)
-        output_dim = output.shape[-1]
-        loss = criterion(output[:, 1:].reshape(-1, output_dim), trg_batch[:, 1:].reshape(-1))
+        logits = tagger_model(x_batch)
+        loss = criterion(logits.view(-1, len(tag_to_ix)), y_batch.view(-1))
         val_loss += loss.item()
 
-        preds = output[:, 1:].argmax(-1)
-        targets = trg_batch[:, 1:]
-        mask = targets != trg_vocab[PAD_TOKEN]
-        correct_tokens += ((preds == targets) & mask).sum().item()
-        total_tokens += mask.sum().item()
+        preds = logits.argmax(dim=-1)
+        mask = y_batch != tag_to_ix[PAD_TOKEN]
+        correct += ((preds == y_batch) & mask).sum().item()
+        total += mask.sum().item()
 
 avg_val_loss = val_loss / len(val_loader)
-accuracy = (correct_tokens / total_tokens) * 100 if total_tokens > 0 else 0.0
+acc = (correct / total) * 100 if total > 0 else 0.0
 print(f"Validation Loss: {avg_val_loss:.4f}")
-print(f"Token-level Accuracy: {accuracy:.2f}%")"""
+print(f"Tag Classification Accuracy: {acc:.2f}%")"""
 )
 
 # ------------------------------------------------------------------------------
-# Cell 11: Interactive Test Cell
+# Stage 9: Graph Router
 # ------------------------------------------------------------------------------
 add_cell(
-    "### 11. Interactive inference cell to translate custom pseudocode into Mermaid flowcharts",
-    """def format_mermaid_tokens(tokens):
-    lines = []
-    curr = []
-    def clean_line(s):
-        s = re.sub(r'(node\d+)\s+(\(\[|\[/|\[|\{)', r'\\1\\2', s)
-        s = re.sub(r'(\(\[|\[/|\[|\{)\s*"', r'\\1"', s)
-        s = re.sub(r'"\s*(\]\)|/\]|\]|\})', r'"\\1', s)
-        s = re.sub(r'"\s+(.*?)\s+"', r'"\\1"', s)
-        return s.strip()
+    "### 9. Define the deterministic Stack-based Graph Router to assemble Mermaid flowcharts",
+    """class FlowchartAssembler:
+    def __init__(self):
+        self.node_count = 0
+        self.nodes = []
+        self.edges = []
 
-    for tok in tokens:
-        if tok == "<NL>":
-            if curr:
-                line_str = clean_line(" ".join(curr))
-                if line_str == "flowchart TD" or "-->" in line_str or re.search(r'node\d+[\[\(\{]', line_str):
-                    lines.append(f"    {line_str}" if line_str != "flowchart TD" else line_str)
-                curr = []
-        else:
-            curr.append(tok)
-    if curr:
-        line_str = clean_line(" ".join(curr))
-        if "-->" in line_str or re.search(r'node\d+[\[\(\{]', line_str):
-            lines.append(f"    {line_str}")
-    return "\\n".join(lines)
+    def _new_id(self):
+        self.node_count += 1
+        return f"node{self.node_count}"
 
-def translate_pseudocode(pseudocode_text, max_len=150):
-    model.eval()
-    tokens = tokenize_pseudocode(pseudocode_text)
-    src_indices = [src_vocab.get(t, src_vocab[UNK_TOKEN]) for t in tokens]
-    src_tensor = torch.tensor([[src_vocab[SOS_TOKEN]] + src_indices + [src_vocab[EOS_TOKEN]]], dtype=torch.long).to(device)
+    def assemble(self, lines, tags):
+        self.node_count = 0
+        self.nodes = []
+        self.edges = []
+
+        if_stack = []
+        loop_stack = []
+        pending_exits = []
+
+        for line, tag in zip(lines, tags):
+            clean_text = line.replace('"', "'")
+
+            if tag == "START_NODE":
+                nid = self._new_id()
+                self.nodes.append(f'    {nid}(["{clean_text}"])')
+                for src, lbl in pending_exits:
+                    edge = f'    {src} -- {lbl} --> {nid}' if lbl else f'    {src} --> {nid}'
+                    self.edges.append(edge)
+                pending_exits = [(nid, "")]
+
+            elif tag == "END_NODE":
+                nid = self._new_id()
+                self.nodes.append(f'    {nid}(["{clean_text}"])')
+                for src, lbl in pending_exits:
+                    edge = f'    {src} -- {lbl} --> {nid}' if lbl else f'    {src} --> {nid}'
+                    self.edges.append(edge)
+                pending_exits = []
+
+            elif tag == "IO_NODE":
+                nid = self._new_id()
+                self.nodes.append(f'    {nid}[/"{clean_text}"/]')
+                for src, lbl in pending_exits:
+                    edge = f'    {src} -- {lbl} --> {nid}' if lbl else f'    {src} --> {nid}'
+                    self.edges.append(edge)
+                pending_exits = [(nid, "")]
+
+            elif tag == "PROCESS_NODE":
+                nid = self._new_id()
+                self.nodes.append(f'    {nid}["{clean_text}"]')
+                for src, lbl in pending_exits:
+                    edge = f'    {src} -- {lbl} --> {nid}' if lbl else f'    {src} --> {nid}'
+                    self.edges.append(edge)
+                pending_exits = [(nid, "")]
+
+            elif tag == "IF_DECISION":
+                cond_text = clean_text[3:].strip() if clean_text.startswith("IF ") else clean_text
+                nid = self._new_id()
+                self.nodes.append(f'    {nid}{{"{cond_text}"}}')
+                for src, lbl in pending_exits:
+                    edge = f'    {src} -- {lbl} --> {nid}' if lbl else f'    {src} --> {nid}'
+                    self.edges.append(edge)
+                if_stack.append({
+                    'cond_id': nid,
+                    'has_else': False,
+                    'then_exits': [],
+                    'else_exits': []
+                })
+                pending_exits = [(nid, "Yes")]
+
+            elif tag == "ELSE_BRANCH":
+                if if_stack:
+                    ctx = if_stack[-1]
+                    ctx['has_else'] = True
+                    ctx['then_exits'] = list(pending_exits)
+                    pending_exits = [(ctx['cond_id'], "No")]
+
+            elif tag == "END_IF":
+                if if_stack:
+                    ctx = if_stack.pop()
+                    if ctx['has_else']:
+                        pending_exits = ctx['then_exits'] + pending_exits
+                    else:
+                        pending_exits = pending_exits + [(ctx['cond_id'], "No")]
+
+            elif tag == "LOOP_HEADER":
+                nid = self._new_id()
+                self.nodes.append(f'    {nid}{{"{clean_text}"}}')
+                for src, lbl in pending_exits:
+                    edge = f'    {src} -- {lbl} --> {nid}' if lbl else f'    {src} --> {nid}'
+                    self.edges.append(edge)
+                loop_stack.append({'for_id': nid})
+                pending_exits = [(nid, "Yes")]
+
+            elif tag == "END_FOR":
+                if loop_stack:
+                    ctx = loop_stack.pop()
+                    for src, lbl in pending_exits:
+                        edge = f'    {src} -- {lbl} --> {ctx["for_id"]}' if lbl else f'    {src} --> {ctx["for_id"]}'
+                        self.edges.append(edge)
+                    pending_exits = [(ctx['for_id'], "No")]
+
+        if pending_exits:
+            nid = self._new_id()
+            self.nodes.append(f'    {nid}(["END"])')
+            for src, lbl in pending_exits:
+                edge = f'    {src} -- {lbl} --> {nid}' if lbl else f'    {src} --> {nid}'
+                self.edges.append(edge)
+
+        return "flowchart TD\\n" + "\\n".join(self.nodes) + "\\n\\n" + "\\n".join(self.edges)
+
+assembler = FlowchartAssembler()"""
+)
+
+# ------------------------------------------------------------------------------
+# Stage 10: Interactive Test Cell
+# ------------------------------------------------------------------------------
+add_cell(
+    "### 10. Interactive inference cell to translate pseudocode into 100% valid Mermaid flowcharts",
+    """if 'tagger_model' not in globals():
+    if 'device' not in globals():
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    if 'word_vocab' not in globals():
+        with open('vocabularies.json', 'r', encoding='utf-8') as f:
+            vdata = json.load(f)
+        word_vocab = vdata['word_vocab']
+        tag_to_ix = vdata['tag_to_ix']
+        ix_to_tag = {v: k for k, v in tag_to_ix.items()}
+    TAGGER_PATH = 'pseudoflow_tagger.pt'
+    checkpoint = torch.load(TAGGER_PATH, map_location=device)
+    tagger_model = BiRNNStatementClassifier(len(word_vocab), 64, 64, len(tag_to_ix)).to(device)
+    tagger_model.load_state_dict(checkpoint['model_state_dict'])
+
+def translate_pseudocode(pseudocode_text):
+    tagger_model.eval()
+    lines = [line.strip() for line in pseudocode_text.splitlines() if line.strip()]
+    encoded_lines = [encode_line_to_words(l) for l in lines]
+    input_tensor = torch.tensor([encoded_lines], dtype=torch.long).to(device)
 
     with torch.no_grad():
-        hidden, cell = model.encoder(src_tensor)
-        decoder_input = torch.tensor([[trg_vocab[SOS_TOKEN]]], dtype=torch.long).to(device)
+        logits = tagger_model(input_tensor)
+        pred_ids = logits.argmax(dim=-1).squeeze(0).tolist()
+        predicted_tags = [ix_to_tag.get(pid, "PROCESS_NODE") for pid in pred_ids]
 
-        translated_tokens = []
-        for _ in range(max_len):
-            prediction, hidden, cell = model.decoder(decoder_input, hidden, cell)
-            top1 = prediction.argmax(-1).item()
+    mermaid_script = assembler.assemble(lines, predicted_tags)
+    return mermaid_script, predicted_tags
 
-            if top1 == trg_vocab[EOS_TOKEN]:
-                break
+sample_input_1 = \"\"\"START
+INPUT n
+IF n % 2 == 0
+    OUTPUT "Even"
+ELSE
+    OUTPUT "Odd"
+END IF
+END\"\"\"
 
-            tok_str = inv_trg_vocab.get(top1, UNK_TOKEN)
-            translated_tokens.append(tok_str)
-            decoder_input = torch.tensor([[top1]], dtype=torch.long).to(device)
-
-    return format_mermaid_tokens(translated_tokens)
-
-sample_test_pseudocode = \"\"\"FOR i = 1 TO n
-    IF i % 2 == 0
-        FOR j = 1 TO i
-            OUTPUT j
-        END FOR
-    ELSE
-        OUTPUT 0
-    END IF
-END FOR\"\"\"
-
-generated_mermaid = translate_pseudocode(sample_test_pseudocode)
-print("=== Input Pseudocode ===")
-print(sample_test_pseudocode)
+mermaid_out_1, tags_out_1 = translate_pseudocode(sample_input_1)
+print("=== Sample 1 (IF-ELSE with Strings) ===")
+print(sample_input_1)
+print("\\n=== Predicted Statement Roles ===")
+for l, t in zip(sample_input_1.splitlines(), tags_out_1):
+    print(f"  {l:<25} -> {t}")
 print("\\n=== Generated Mermaid Script ===")
-print(generated_mermaid)"""
-)
+print(mermaid_out_1)
 
-# ------------------------------------------------------------------------------
-# Cell 12: Transformer Architecture & Training
-# ------------------------------------------------------------------------------
-add_cell(
-    "### 12. Define and train the Transformer Seq2Seq translation model using CUDA if available",
-    """class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len=5000):
-        super().__init__()
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-torch.log(torch.tensor(10000.0)) / d_model))
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe.unsqueeze(0))
-
-    def forward(self, x):
-        return x + self.pe[:, :x.size(1)]
-
-class TransformerSeq2Seq(nn.Module):
-    def __init__(self, src_vocab_size, trg_vocab_size, d_model=128, nhead=4, num_encoder_layers=2, num_decoder_layers=2, dim_feedforward=256, dropout=0.1):
-        super().__init__()
-        self.d_model = d_model
-        self.src_tok_emb = nn.Embedding(src_vocab_size, d_model, padding_idx=0)
-        self.trg_tok_emb = nn.Embedding(trg_vocab_size, d_model, padding_idx=0)
-        self.pos_encoder = PositionalEncoding(d_model)
-        self.transformer = nn.Transformer(
-            d_model=d_model,
-            nhead=nhead,
-            num_encoder_layers=num_encoder_layers,
-            num_decoder_layers=num_decoder_layers,
-            dim_feedforward=dim_feedforward,
-            dropout=dropout,
-            batch_first=True
-        )
-        self.fc_out = nn.Linear(d_model, trg_vocab_size)
-
-    def forward(self, src, trg, src_mask=None, trg_mask=None, src_padding_mask=None, trg_padding_mask=None):
-        src_emb = self.pos_encoder(self.src_tok_emb(src) * (self.d_model ** 0.5))
-        trg_emb = self.pos_encoder(self.trg_tok_emb(trg) * (self.d_model ** 0.5))
-        outs = self.transformer(
-            src_emb, trg_emb,
-            src_mask=src_mask,
-            tgt_mask=trg_mask,
-            src_key_padding_mask=src_padding_mask,
-            tgt_key_padding_mask=trg_padding_mask
-        )
-        return self.fc_out(outs)
-
-    def encode(self, src):
-        src_emb = self.pos_encoder(self.src_tok_emb(src) * (self.d_model ** 0.5))
-        return self.transformer.encoder(src_emb)
-
-    def decode(self, trg, memory, trg_mask=None):
-        trg_emb = self.pos_encoder(self.trg_tok_emb(trg) * (self.d_model ** 0.5))
-        return self.transformer.decoder(trg_emb, memory, tgt_mask=trg_mask)
-
-TRANSFORMER_PATH = "pseudoflow_transformer.pt"
-transformer_model = TransformerSeq2Seq(len(src_vocab), len(trg_vocab)).to(device)
-criterion_tf = nn.CrossEntropyLoss(ignore_index=trg_vocab[PAD_TOKEN])
-optimizer_tf = optim.Adam(transformer_model.parameters(), lr=0.001)
-
-if os.path.exists(TRANSFORMER_PATH):
-    checkpoint_tf = torch.load(TRANSFORMER_PATH, map_location=device)
-    transformer_model.load_state_dict(checkpoint_tf["model_state_dict"])
-    print(f"Loaded existing Transformer model from {TRANSFORMER_PATH}")
-else:
-    print(f"Training Transformer on device: {device}")
-    MAX_EPOCHS = 20
-    for epoch in range(MAX_EPOCHS):
-        transformer_model.train()
-        epoch_loss = 0.0
-        correct = 0
-        total = 0
-
-        for src_batch, trg_batch in train_loader:
-            src_batch = src_batch.to(device)
-            trg_batch = trg_batch.to(device)
-
-            trg_input = trg_batch[:, :-1]
-            trg_expected = trg_batch[:, 1:]
-
-            seq_len = trg_input.size(1)
-            tgt_mask = nn.Transformer.generate_square_subsequent_mask(seq_len).to(device)
-            src_pad_mask = (src_batch == src_vocab[PAD_TOKEN]).to(device)
-            trg_pad_mask = (trg_input == trg_vocab[PAD_TOKEN]).to(device)
-
-            optimizer_tf.zero_grad()
-            output = transformer_model(
-                src_batch, trg_input,
-                trg_mask=tgt_mask,
-                src_padding_mask=src_pad_mask,
-                trg_padding_mask=trg_pad_mask
-            )
-
-            loss = criterion_tf(output.reshape(-1, len(trg_vocab)), trg_expected.reshape(-1))
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(transformer_model.parameters(), max_norm=1.0)
-            optimizer_tf.step()
-
-            epoch_loss += loss.item()
-            preds = output.argmax(dim=-1)
-            mask = trg_expected != trg_vocab[PAD_TOKEN]
-            correct += ((preds == trg_expected) & mask).sum().item()
-            total += mask.sum().item()
-
-        avg_loss = epoch_loss / len(train_loader)
-        acc = (correct / total) if total > 0 else 0.0
-        if (epoch + 1) % 5 == 0 or epoch == 0 or avg_loss <= 0.10:
-            print(f"Epoch {epoch + 1}/{MAX_EPOCHS} - Loss: {avg_loss:.4f} - Token Accuracy: {acc * 100:.2f}%")
-
-        if avg_loss <= 0.10:
-            print(f"Target loss <= 0.10 reached at epoch {epoch + 1}!")
-            break
-
-    torch.save({
-        "model_state_dict": transformer_model.state_dict(),
-        "src_vocab": src_vocab,
-        "trg_vocab": trg_vocab
-    }, TRANSFORMER_PATH)
-    print(f"Transformer model saved to {TRANSFORMER_PATH}")"""
-)
-
-# ------------------------------------------------------------------------------
-# Cell 13: Transformer Inference Testing
-# ------------------------------------------------------------------------------
-add_cell(
-    "### 13. Interactive inference cell to translate pseudocode using the trained Transformer model",
-    """def translate_pseudocode_transformer(pseudocode_text, max_len=150):
-    transformer_model.eval()
-    tokens = tokenize_pseudocode(pseudocode_text)
-    src_indices = [src_vocab.get(t, src_vocab[UNK_TOKEN]) for t in tokens]
-    src_tensor = torch.tensor([[src_vocab[SOS_TOKEN]] + src_indices + [src_vocab[EOS_TOKEN]]], dtype=torch.long).to(device)
-
-    with torch.no_grad():
-        memory = transformer_model.encode(src_tensor)
-        ys = torch.tensor([[trg_vocab[SOS_TOKEN]]], dtype=torch.long).to(device)
-
-        for _ in range(max_len):
-            tgt_mask = nn.Transformer.generate_square_subsequent_mask(ys.size(1)).to(device)
-            out = transformer_model.decode(ys, memory, trg_mask=tgt_mask)
-            prob = transformer_model.fc_out(out[:, -1])
-            next_word = prob.argmax(dim=-1).item()
-
-            if next_word == trg_vocab[EOS_TOKEN]:
-                break
-
-            ys = torch.cat([ys, torch.tensor([[next_word]], dtype=torch.long).to(device)], dim=1)
-
-    translated_tokens = [inv_trg_vocab.get(idx, UNK_TOKEN) for idx in ys.squeeze(0).tolist()[1:]]
-    return format_mermaid_tokens(translated_tokens)
-
-test_code_input = \"\"\"FOR i = 1 TO n
+sample_input_2 = \"\"\"FOR i = 1 TO n
     IF i % 2 == 0
         FOR j = 1 TO i
             OUTPUT j
@@ -606,11 +489,12 @@ test_code_input = \"\"\"FOR i = 1 TO n
     END IF
 END FOR\"\"\"
 
-generated_mermaid_tf = translate_pseudocode_transformer(test_code_input)
-print("=== Input Pseudocode ===")
-print(test_code_input)
-print("\\n=== Transformer Generated Mermaid Script ===")
-print(generated_mermaid_tf)"""
+mermaid_out_2, tags_out_2 = translate_pseudocode(sample_input_2)
+print("\\n" + "=" * 55 + "\\n")
+print("=== Sample 2 (Nested FOR and IF-ELSE) ===")
+print(sample_input_2)
+print("\\n=== Generated Mermaid Script ===")
+print(mermaid_out_2)"""
 )
 
 notebook_content = {
@@ -641,4 +525,4 @@ notebook_content = {
 with open("PseudoFlow_Translator.ipynb", "w", encoding="utf-8") as f:
     json.dump(notebook_content, f, indent=1)
 
-print(f"Successfully created PseudoFlow_Translator.ipynb with {len(cells)} cells ({len(cells)//2} code stages).")
+print(f"Successfully generated PseudoFlow_Translator.ipynb with {len(cells)} cells ({len(cells)//2} stages).")
